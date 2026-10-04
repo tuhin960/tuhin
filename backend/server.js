@@ -30,3 +30,5 @@ app.use((req, res) => res.status(404).json({ error: "Not found" }));
 app.listen(PORT, () => {
   console.log(`Swasth Setu backend running on http://localhost:${PORT}`);
 });
+
+export default app;
