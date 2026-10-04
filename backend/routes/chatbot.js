@@ -10,7 +10,7 @@ import { verifyFirebaseToken } from "../middleware/verifyFirebaseToken.js";
 
 const router = Router();
 
-const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-1.5-flash";
+const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-3.5-flash-lite";
 
 const SYSTEM_PROMPT = `You are "Setu", a friendly health-information assistant inside the Swasth Setu app.
 Rules you must always follow:
@@ -31,7 +31,9 @@ router.post("/", verifyFirebaseToken, async (req, res) => {
   }
 
   const contents = [
-    ...(Array.isArray(history) ? history : []).map((h) => ({
+    ...(Array.isArray(history) ? history : [])
+      .filter((h, i) => !(i === 0 && h.role === "assistant"))
+      .map((h) => ({
       role: h.role === "assistant" ? "model" : "user",
       parts: [{ text: h.text }],
     })),

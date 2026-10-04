@@ -1,0 +1,446 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    // Collection: users
+    // Document ID: userId (auth.uid)
+    // Fields: uid, name, email, role, createdAt, mobile(opt), specialId(opt), specialization(opt), dailyLimit(opt)
+    //
+    // Collection: medicineStock
+    // Fields: pharmacyUid, pharmacyName, medicineName, medicineNameLower, quantity, price, updatedAt
+    //
+    // Collection: alerts
+    // Fields: patientUid, patientName, patientId, message, status, createdAt, acknowledgedBy(opt), acknowledgedAt(opt)
+    //
+    // Collection: tokenCounters
+    // Fields: count
+    //
+    // Collection: appointments
+    // Fields: doctorUid, doctorName, patientName, patientId, date, status, hasIntake, createdAt, patientUid(opt), tokenNumber(opt), note(opt), bookedByUid(opt), bookedByName(opt), acceptedAt(opt), rejectedAt(opt), finishedAt(opt), scheduledTime(opt), joinCodeExpiresAt(opt), joinCode(opt), rejectReason(opt)
+    //
+    // Collection: intakes
+    // Fields: appointmentId, doctorUid, patientUid, patientName, patientId, originalText, language, consent, createdAt, summary(opt)
+    //
+    // Collection: doctorPatients
+    // Fields: doctorUid, patientUid, patientName, patientId, lastAcceptedAt
+    //
+    // Collection: consultations
+    // Fields: appointmentId, doctorUid, doctorName, patientUid, patientName, patientId, date, createdAt, tokenNumber(opt), diagnosis(opt), advice(opt), followUpDate(opt)
+    //
+    // Collection: records
+    // Fields: patientUid, patientName, patientId, title, fileName, fileType, fileSize, createdAt
+    //
+    // Collection: recordFiles
+    // Fields: recordId, patientUid, dataUrl
+    //
+    // Collection: fieldPatients
+    // Fields: patientId, name, gender, village, contactNumber, registeredByUid, registeredByName, createdAt, age(opt)
+    //
+    // Collection: assessments
+    // Fields: fieldPatientId, fieldPatientName, healthworkerUid, healthworkerName, vitals, symptoms, notes, riskLevel, followUpDate, createdAt
+    //
+    // Collection: referrals
+    // Fields: referredByUid, referredByName, referredByRole, patientName, patientId, toFacility, reason, urgency, status, createdAt, patientRefType(opt), patientRefId(opt), patientUid(opt)
+    //
+    // Collection: prescriptions
+    // Fields: doctorUid, doctorName, patientUid, patientName, patientId, medicines, notes, date, createdAt, appointmentId(opt)
+    //
+    // Collection: notifications
+    // Fields: userId, title, body, createdAt, read
+    //
+    // Collection: pharmacyRequests
+    // Fields: patientUid, patientName, pharmacyUid, pharmacyName, prescriptionData, status, medicinesStatus, createdAt, updatedAt
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    function isAuthenticated() {
+       return request.auth != null;
+    }
+    
+    function getUserRole() {
+       return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+    }
+    
+    function isDoctor() {
+       return isAuthenticated() && getUserRole() == 'doctor';
+    }
+    
+    function isHealthworker() {
+       return isAuthenticated() && getUserRole() == 'healthworker';
+    }
+    
+    function areImmutableFieldsUnchanged(fields) {
+       return !request.resource.data.diff(resource.data).affectedKeys().hasAny(fields);
+    }
+    
+    function isValidOptionalString(field, minLen, maxLen) {
+       return !(field in request.resource.data) ||
+              request.resource.data[field] == null ||
+              (request.resource.data[field] is string &&
+               request.resource.data[field].size() >= minLen &&
+               request.resource.data[field].size() <= maxLen);
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+    function isValidUser() {
+      let rData = request.resource.data;
+      return rData.keys().hasAll(['uid', 'name', 'email', 'role', 'createdAt']) &&
+             rData.keys().hasOnly(['uid', 'name', 'email', 'role', 'createdAt', 'mobile', 'specialId', 'specialization', 'dailyLimit']) &&
+             rData.uid == request.auth.uid &&
+             rData.name is string && rData.name.size() > 0 && rData.name.size() <= 100 &&
+             rData.email is string && rData.email.size() > 0 && rData.email.size() <= 100 &&
+             rData.role in ['patient', 'healthworker', 'doctor', 'pharmacy', 'admin'] &&
+             rData.role != 'admin' &&
+             isValidOptionalString('mobile', 1, 20) &&
+             isValidOptionalString('specialId', 1, 50) &&
+             isValidOptionalString('specialization', 1, 100) &&
+             (!( 'dailyLimit' in rData ) || (rData.dailyLimit is number && rData.dailyLimit >= 0)) &&
+             rData.createdAt is timestamp;
+    }
+
+    match /users/{userId} {
+      // NOTE: This allows reading doctor/pharmacy profiles to support client queries.
+      // This exposes PII (email/mobile). A 'users_public' collection is recommended for production.
+      allow read: if isAuthenticated() && (request.auth.uid == userId || resource.data.role == 'doctor' || resource.data.role == 'pharmacy');
+      allow create: if isAuthenticated() && request.auth.uid == userId && isValidUser();
+      allow update: if isAuthenticated() && request.auth.uid == userId && isValidUser() &&
+                       areImmutableFieldsUnchanged(['uid', 'email', 'role', 'specialId', 'createdAt']);
+    }
+
+    function isValidMedicineStock() {
+      let rData = request.resource.data;
+      return rData.keys().hasAll(['pharmacyUid', 'pharmacyName', 'medicineName', 'medicineNameLower', 'quantity', 'price', 'updatedAt']) &&
+             rData.keys().hasOnly(['pharmacyUid', 'pharmacyName', 'medicineName', 'medicineNameLower', 'quantity', 'price', 'updatedAt']) &&
+             rData.pharmacyUid == request.auth.uid &&
+             rData.pharmacyName is string && rData.pharmacyName.size() > 0 && rData.pharmacyName.size() <= 100 &&
+             rData.medicineName is string && rData.medicineName.size() > 0 && rData.medicineName.size() <= 200 &&
+             rData.medicineNameLower is string && rData.medicineNameLower.size() > 0 && rData.medicineNameLower.size() <= 200 &&
+             rData.quantity is number && rData.quantity >= 0 &&
+             rData.price is number && rData.price >= 0 &&
+             rData.updatedAt is timestamp;
+    }
+
+    match /medicineStock/{stockId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated() && request.resource.data.pharmacyUid == request.auth.uid && isValidMedicineStock();
+    }
+
+    function isValidAlert() {
+      let rData = request.resource.data;
+      return rData.keys().hasAll(['patientUid', 'patientName', 'patientId', 'message', 'status', 'createdAt']) &&
+             rData.keys().hasOnly(['patientUid', 'patientName', 'patientId', 'message', 'status', 'createdAt', 'acknowledgedBy', 'acknowledgedAt']) &&
+             rData.patientUid == request.auth.uid &&
+             rData.patientName is string && rData.patientName.size() > 0 && rData.patientName.size() <= 100 &&
+             rData.patientId is string && rData.patientId.size() > 0 && rData.patientId.size() <= 100 &&
+             rData.message is string && rData.message.size() > 0 && rData.message.size() <= 1000 &&
+             rData.status in ['open', 'acknowledged'] &&
+             rData.createdAt is timestamp &&
+             isValidOptionalString('acknowledgedBy', 1, 100) &&
+             (!( 'acknowledgedAt' in rData ) || (rData.acknowledgedAt is timestamp));
+    }
+
+    match /alerts/{alertId} {
+      allow read: if isAuthenticated() && (resource.data.patientUid == request.auth.uid || isDoctor() || isHealthworker());
+      allow create: if isAuthenticated() && request.resource.data.patientUid == request.auth.uid && isValidAlert();
+      allow update: if isAuthenticated() && (isDoctor() || isHealthworker()) && isValidAlert() &&
+                       request.resource.data.status == 'acknowledged' &&
+                       areImmutableFieldsUnchanged(['patientUid', 'patientName', 'patientId', 'message', 'createdAt']);
+    }
+
+    match /tokenCounters/{counterId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && request.resource.data.keys().hasOnly(['count']) && request.resource.data.count == 1;
+      allow update: if isAuthenticated() && request.resource.data.keys().hasOnly(['count']) && request.resource.data.count == resource.data.count + 1;
+    }
+
+    function isValidAppointment() {
+      let rData = request.resource.data;
+      return rData.keys().hasAll(['doctorUid', 'doctorName', 'patientName', 'patientId', 'date', 'status', 'hasIntake', 'createdAt']) &&
+             rData.keys().hasOnly(['doctorUid', 'doctorName', 'patientUid', 'patientName', 'patientId', 'tokenNumber', 'date', 'status', 'hasIntake', 'note', 'bookedByUid', 'bookedByName', 'createdAt', 'acceptedAt', 'rejectedAt', 'finishedAt', 'scheduledTime', 'joinCodeExpiresAt', 'joinCode', 'rejectReason']) &&
+             rData.doctorUid is string && rData.doctorUid.size() > 0 && rData.doctorUid.size() <= 100 &&
+             rData.doctorName is string && rData.doctorName.size() > 0 && rData.doctorName.size() <= 100 &&
+             (!( 'patientUid' in rData ) || rData.patientUid == null || (rData.patientUid is string && rData.patientUid.size() > 0 && rData.patientUid.size() <= 100)) &&
+             rData.patientName is string && rData.patientName.size() > 0 && rData.patientName.size() <= 100 &&
+             rData.patientId is string && rData.patientId.size() > 0 && rData.patientId.size() <= 100 &&
+             (!( 'tokenNumber' in rData ) || rData.tokenNumber == null || (rData.tokenNumber is number && rData.tokenNumber >= 1)) &&
+             rData.date is string && rData.date.size() == 10 &&
+             rData.status in ['requested', 'waiting', 'in-progress', 'done', 'rejected', 'destroyed'] &&
+             rData.hasIntake is bool &&
+             isValidOptionalString('note', 0, 1000) &&
+             (!( 'bookedByUid' in rData ) || (rData.bookedByUid is string && rData.bookedByUid.size() > 0)) &&
+             isValidOptionalString('bookedByName', 1, 100) &&
+             rData.createdAt is timestamp &&
+             (!( 'acceptedAt' in rData ) || rData.acceptedAt is timestamp) &&
+             (!( 'rejectedAt' in rData ) || rData.rejectedAt is timestamp) &&
+             (!( 'finishedAt' in rData ) || rData.finishedAt is timestamp) &&
+             (!( 'scheduledTime' in rData ) || rData.scheduledTime is timestamp) &&
+             (!( 'joinCodeExpiresAt' in rData ) || rData.joinCodeExpiresAt is timestamp) &&
+             isValidOptionalString('joinCode', 1, 20) &&
+             isValidOptionalString('rejectReason', 1, 500);
+    }
+
+    match /appointments/{appId} {
+      allow read: if isAuthenticated() && (
+                      resource.data.patientUid == request.auth.uid ||
+                      resource.data.doctorUid == request.auth.uid ||
+                      resource.data.bookedByUid == request.auth.uid
+                  );
+      allow create: if isAuthenticated() && isValidAppointment() && (
+                      (request.resource.data.patientUid == request.auth.uid && !('bookedByUid' in request.resource.data)) ||
+                      (request.resource.data.bookedByUid == request.auth.uid && request.resource.data.patientUid == null)
+                  );
+      allow update: if isAuthenticated() && isValidAppointment() && resource.data.doctorUid == request.auth.uid &&
+                       areImmutableFieldsUnchanged(['doctorUid', 'doctorName', 'patientUid', 'patientName', 'patientId', 'hasIntake', 'bookedByUid', 'bookedByName', 'createdAt', 'note']);
+    }
+
+    function isValidIntake() {
+      let rData = request.resource.data;
+      return rData.keys().hasAll(['appointmentId', 'doctorUid', 'patientUid', 'patientName', 'patientId', 'originalText', 'language', 'consent', 'createdAt']) &&
+             rData.keys().hasOnly(['appointmentId', 'doctorUid', 'patientUid', 'patientName', 'patientId', 'originalText', 'language', 'summary', 'consent', 'createdAt']) &&
+             rData.appointmentId is string && rData.appointmentId.size() > 0 && rData.appointmentId.size() <= 100 &&
+             rData.doctorUid is string && rData.doctorUid.size() > 0 && rData.doctorUid.size() <= 100 &&
+             rData.patientUid == request.auth.uid &&
+             rData.patientName is string && rData.patientName.size() > 0 && rData.patientName.size() <= 100 &&
+             rData.patientId is string && rData.patientId.size() > 0 && rData.patientId.size() <= 100 &&
+             rData.originalText is string && rData.originalText.size() <= 5000 &&
+             rData.language is string && rData.language.size() <= 50 &&
+             (!( 'summary' in rData ) || rData.summary == null || (rData.summary is map && rData.summary.size() <= 20)) &&
+             rData.consent is bool && rData.consent == true &&
+             rData.createdAt is timestamp;
+    }
+
+    match /intakes/{appId} {
+      allow read: if isAuthenticated() && (resource.data.patientUid == request.auth.uid || resource.data.doctorUid == request.auth.uid);
+      allow create: if isAuthenticated() && request.resource.data.patientUid == request.auth.uid && isValidIntake();
+      allow update: if false;
+    }
+
+    function isValidDoctorPatient() {
+      let rData = request.resource.data;
+      return rData.keys().hasAll(['doctorUid', 'patientUid', 'patientName', 'patientId', 'lastAcceptedAt']) &&
+             rData.keys().hasOnly(['doctorUid', 'patientUid', 'patientName', 'patientId', 'lastAcceptedAt']) &&
+             rData.doctorUid == request.auth.uid &&
+             rData.patientUid is string && rData.patientUid.size() > 0 && rData.patientUid.size() <= 100 &&
+             rData.patientName is string && rData.patientName.size() > 0 && rData.patientName.size() <= 100 &&
+             rData.patientId is string && rData.patientId.size() > 0 && rData.patientId.size() <= 100 &&
+             rData.lastAcceptedAt is timestamp;
+    }
+
+    match /doctorPatients/{dpId} {
+      allow read: if isAuthenticated() && (resource.data.doctorUid == request.auth.uid || resource.data.patientUid == request.auth.uid);
+      allow create, update: if isAuthenticated() && request.resource.data.doctorUid == request.auth.uid && isValidDoctorPatient();
+    }
+
+    function isValidConsultation() {
+      let rData = request.resource.data;
+      return rData.keys().hasAll(['appointmentId', 'doctorUid', 'doctorName', 'patientUid', 'patientName', 'patientId', 'date', 'createdAt']) &&
+             rData.keys().hasOnly(['appointmentId', 'doctorUid', 'doctorName', 'patientUid', 'patientName', 'patientId', 'tokenNumber', 'diagnosis', 'advice', 'followUpDate', 'date', 'createdAt']) &&
+             rData.appointmentId is string && rData.appointmentId.size() > 0 && rData.appointmentId.size() <= 100 &&
+             rData.doctorUid == request.auth.uid &&
+             rData.doctorName is string && rData.doctorName.size() > 0 && rData.doctorName.size() <= 100 &&
+             rData.patientUid is string && rData.patientUid.size() > 0 && rData.patientUid.size() <= 100 &&
+             rData.patientName is string && rData.patientName.size() > 0 && rData.patientName.size() <= 100 &&
+             rData.patientId is string && rData.patientId.size() > 0 && rData.patientId.size() <= 100 &&
+             (!( 'tokenNumber' in rData ) || rData.tokenNumber == null || (rData.tokenNumber is number && rData.tokenNumber >= 1)) &&
+             isValidOptionalString('diagnosis', 0, 5000) &&
+             isValidOptionalString('advice', 0, 5000) &&
+             isValidOptionalString('followUpDate', 0, 20) &&
+             rData.date is string && rData.date.size() == 10 &&
+             rData.createdAt is timestamp;
+    }
+
+    match /consultations/{consId} {
+      allow read: if isAuthenticated() && (resource.data.doctorUid == request.auth.uid || resource.data.patientUid == request.auth.uid);
+      allow create: if isAuthenticated() && request.resource.data.doctorUid == request.auth.uid && isValidConsultation();
+      allow update: if isAuthenticated() && resource.data.doctorUid == request.auth.uid && isValidConsultation() &&
+                       areImmutableFieldsUnchanged(['appointmentId', 'doctorUid', 'patientUid', 'createdAt']);
+    }
+
+    function isValidRecord() {
+      let rData = request.resource.data;
+      return rData.keys().hasAll(['patientUid', 'patientName', 'patientId', 'title', 'fileName', 'fileType', 'fileSize', 'createdAt']) &&
+             rData.keys().hasOnly(['patientUid', 'patientName', 'patientId', 'title', 'fileName', 'fileType', 'fileSize', 'createdAt']) &&
+             rData.patientUid == request.auth.uid &&
+             rData.patientName is string && rData.patientName.size() > 0 && rData.patientName.size() <= 100 &&
+             rData.patientId is string && rData.patientId.size() > 0 && rData.patientId.size() <= 100 &&
+             rData.title is string && rData.title.size() <= 200 &&
+             rData.fileName is string && rData.fileName.size() > 0 && rData.fileName.size() <= 255 &&
+             rData.fileType is string && rData.fileType.size() > 0 && rData.fileType.size() <= 50 &&
+             rData.fileSize is number && rData.fileSize > 0 && rData.fileSize <= 1048576 &&
+             rData.createdAt is timestamp;
+    }
+
+    match /records/{recordId} {
+      allow read: if isAuthenticated() && (
+                      resource.data.patientUid == request.auth.uid ||
+                      exists(/databases/$(database)/documents/doctorPatients/$(request.auth.uid + '_' + resource.data.patientUid))
+                  );
+      allow create: if isAuthenticated() && request.resource.data.patientUid == request.auth.uid && isValidRecord();
+      allow update: if false; // Uploaded records shouldn't be edited
+      allow delete: if isAuthenticated() && resource.data.patientUid == request.auth.uid;
+    }
+
+    function isValidRecordFile() {
+      let rData = request.resource.data;
+      return rData.keys().hasAll(['recordId', 'patientUid', 'dataUrl']) &&
+             rData.keys().hasOnly(['recordId', 'patientUid', 'dataUrl']) &&
+             rData.recordId is string && rData.recordId.size() > 0 && rData.recordId.size() <= 100 &&
+             rData.patientUid == request.auth.uid &&
+             rData.dataUrl is string && rData.dataUrl.size() <= 1048576;
+    }
+
+    match /recordFiles/{rfId} {
+      allow read: if isAuthenticated() && (
+                      resource.data.patientUid == request.auth.uid ||
+                      exists(/databases/$(database)/documents/doctorPatients/$(request.auth.uid + '_' + resource.data.patientUid))
+                  );
+      allow create: if isAuthenticated() && request.resource.data.patientUid == request.auth.uid && isValidRecordFile();
+      allow update: if false;
+      allow delete: if isAuthenticated() && resource.data.patientUid == request.auth.uid;
+    }
+
+    function isValidFieldPatient() {
+      let rData = request.resource.data;
+      return rData.keys().hasAll(['patientId', 'name', 'gender', 'village', 'contactNumber', 'registeredByUid', 'registeredByName', 'createdAt']) &&
+             rData.keys().hasOnly(['patientId', 'name', 'age', 'gender', 'village', 'contactNumber', 'registeredByUid', 'registeredByName', 'createdAt']) &&
+             rData.patientId is string && rData.patientId.size() > 0 && rData.patientId.size() <= 100 &&
+             rData.name is string && rData.name.size() > 0 && rData.name.size() <= 100 &&
+             (!( 'age' in rData ) || rData.age == null || (rData.age is number && rData.age >= 0 && rData.age <= 150)) &&
+             rData.gender is string && rData.gender.size() <= 20 &&
+             rData.village is string && rData.village.size() <= 100 &&
+             rData.contactNumber is string && rData.contactNumber.size() <= 20 &&
+             rData.registeredByUid == request.auth.uid &&
+             rData.registeredByName is string && rData.registeredByName.size() > 0 && rData.registeredByName.size() <= 100 &&
+             rData.createdAt is timestamp;
+    }
+
+    match /fieldPatients/{fpId} {
+      allow read: if isAuthenticated() && (resource.data.registeredByUid == request.auth.uid || isDoctor());
+      allow create: if isAuthenticated() && isHealthworker() && request.resource.data.registeredByUid == request.auth.uid && isValidFieldPatient();
+      allow update: if isAuthenticated() && resource.data.registeredByUid == request.auth.uid && isValidFieldPatient() &&
+                       areImmutableFieldsUnchanged(['patientId', 'registeredByUid', 'createdAt']);
+    }
+
+    function isValidAssessment() {
+      let rData = request.resource.data;
+      return rData.keys().hasAll(['fieldPatientId', 'fieldPatientName', 'healthworkerUid', 'healthworkerName', 'vitals', 'symptoms', 'notes', 'riskLevel', 'followUpDate', 'createdAt']) &&
+             rData.keys().hasOnly(['fieldPatientId', 'fieldPatientName', 'healthworkerUid', 'healthworkerName', 'vitals', 'symptoms', 'notes', 'riskLevel', 'followUpDate', 'createdAt']) &&
+             rData.fieldPatientId is string && rData.fieldPatientId.size() > 0 && rData.fieldPatientId.size() <= 100 &&
+             rData.fieldPatientName is string && rData.fieldPatientName.size() > 0 && rData.fieldPatientName.size() <= 100 &&
+             rData.healthworkerUid == request.auth.uid &&
+             rData.healthworkerName is string && rData.healthworkerName.size() > 0 && rData.healthworkerName.size() <= 100 &&
+             rData.vitals is map && rData.vitals.size() <= 20 &&
+             rData.symptoms is list && rData.symptoms.size() <= 50 &&
+             rData.notes is string && rData.notes.size() <= 5000 &&
+             rData.riskLevel is string && rData.riskLevel.size() <= 50 &&
+             rData.followUpDate is string && rData.followUpDate.size() <= 20 &&
+             rData.createdAt is timestamp;
+    }
+
+    match /assessments/{assId} {
+      allow read: if isAuthenticated() && resource.data.healthworkerUid == request.auth.uid;
+      allow create: if isAuthenticated() && isHealthworker() && request.resource.data.healthworkerUid == request.auth.uid && isValidAssessment();
+      allow update: if isAuthenticated() && resource.data.healthworkerUid == request.auth.uid && isValidAssessment() &&
+                       areImmutableFieldsUnchanged(['fieldPatientId', 'healthworkerUid', 'createdAt']);
+    }
+
+    function isValidReferral() {
+      let rData = request.resource.data;
+      return rData.keys().hasAll(['referredByUid', 'referredByName', 'referredByRole', 'patientName', 'patientId', 'toFacility', 'reason', 'urgency', 'status', 'createdAt']) &&
+             rData.keys().hasOnly(['referredByUid', 'referredByName', 'referredByRole', 'patientRefType', 'patientRefId', 'patientName', 'patientId', 'patientUid', 'toFacility', 'reason', 'urgency', 'status', 'createdAt']) &&
+             rData.referredByUid == request.auth.uid &&
+             rData.referredByName is string && rData.referredByName.size() > 0 && rData.referredByName.size() <= 100 &&
+             rData.referredByRole is string && rData.referredByRole.size() > 0 && rData.referredByRole.size() <= 50 &&
+             (!( 'patientRefType' in rData ) || (rData.patientRefType is string && rData.patientRefType.size() <= 50)) &&
+             (!( 'patientRefId' in rData ) || (rData.patientRefId is string && rData.patientRefId.size() <= 100)) &&
+             rData.patientName is string && rData.patientName.size() > 0 && rData.patientName.size() <= 100 &&
+             rData.patientId is string && rData.patientId.size() > 0 && rData.patientId.size() <= 100 &&
+             (!( 'patientUid' in rData ) || rData.patientUid == null || (rData.patientUid is string && rData.patientUid.size() > 0 && rData.patientUid.size() <= 100)) &&
+             rData.toFacility is string && rData.toFacility.size() > 0 && rData.toFacility.size() <= 200 &&
+             rData.reason is string && rData.reason.size() <= 5000 &&
+             rData.urgency is string && rData.urgency.size() <= 50 &&
+             rData.status is string && rData.status.size() <= 50 &&
+             rData.createdAt is timestamp;
+    }
+
+    match /referrals/{refId} {
+      allow read: if isAuthenticated() && (resource.data.referredByUid == request.auth.uid || resource.data.patientUid == request.auth.uid);
+      allow create: if isAuthenticated() && request.resource.data.referredByUid == request.auth.uid && isValidReferral();
+      allow update: if isAuthenticated() && resource.data.referredByUid == request.auth.uid && isValidReferral() &&
+                       areImmutableFieldsUnchanged(['referredByUid', 'patientUid', 'createdAt']);
+    }
+
+    function isValidPrescription() {
+      let rData = request.resource.data;
+      return rData.keys().hasAll(['doctorUid', 'doctorName', 'patientUid', 'patientName', 'patientId', 'medicines', 'notes', 'date', 'createdAt']) &&
+             rData.keys().hasOnly(['doctorUid', 'doctorName', 'patientUid', 'patientName', 'patientId', 'medicines', 'notes', 'appointmentId', 'date', 'createdAt']) &&
+             rData.doctorUid == request.auth.uid &&
+             rData.doctorName is string && rData.doctorName.size() > 0 && rData.doctorName.size() <= 100 &&
+             rData.patientUid is string && rData.patientUid.size() > 0 && rData.patientUid.size() <= 100 &&
+             rData.patientName is string && rData.patientName.size() > 0 && rData.patientName.size() <= 100 &&
+             rData.patientId is string && rData.patientId.size() <= 100 &&
+             rData.medicines is list && rData.medicines.size() > 0 && rData.medicines.size() <= 50 &&
+             rData.notes is string && rData.notes.size() <= 5000 &&
+             (!( 'appointmentId' in rData ) || rData.appointmentId == null || (rData.appointmentId is string && rData.appointmentId.size() <= 100)) &&
+             rData.date is string && rData.date.size() == 10 &&
+             rData.createdAt is timestamp;
+    }
+
+    match /prescriptions/{presId} {
+      allow read: if isAuthenticated() && (resource.data.doctorUid == request.auth.uid || resource.data.patientUid == request.auth.uid);
+      allow create: if isAuthenticated() && request.resource.data.doctorUid == request.auth.uid && isValidPrescription() &&
+                       exists(/databases/$(database)/documents/doctorPatients/$(request.auth.uid + '_' + request.resource.data.patientUid));
+      allow update: if isAuthenticated() && resource.data.doctorUid == request.auth.uid && isValidPrescription() &&
+                       areImmutableFieldsUnchanged(['doctorUid', 'patientUid', 'createdAt']);
+    }
+
+    function isValidNotification() {
+      let rData = request.resource.data;
+      return rData.keys().hasAll(['userId', 'title', 'body', 'createdAt', 'read']) &&
+             rData.keys().hasOnly(['userId', 'title', 'body', 'createdAt', 'read']) &&
+             rData.userId is string && rData.userId.size() > 0 && rData.userId.size() <= 100 &&
+             rData.title is string && rData.title.size() > 0 && rData.title.size() <= 200 &&
+             rData.body is string && rData.body.size() > 0 && rData.body.size() <= 2000 &&
+             rData.createdAt is timestamp &&
+             rData.read is bool;
+    }
+
+    match /notifications/{notifId} {
+      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow create: if isAuthenticated() && isValidNotification(); 
+      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid && isValidNotification() &&
+                       areImmutableFieldsUnchanged(['userId', 'title', 'body', 'createdAt']);
+    }
+
+    function isValidPharmacyRequest() {
+      let rData = request.resource.data;
+      return rData.keys().hasAll(['patientUid', 'patientName', 'pharmacyUid', 'pharmacyName', 'prescriptionData', 'status', 'medicinesStatus', 'createdAt', 'updatedAt']) &&
+             rData.keys().hasOnly(['patientUid', 'patientName', 'pharmacyUid', 'pharmacyName', 'prescriptionData', 'status', 'medicinesStatus', 'createdAt', 'updatedAt']) &&
+             rData.patientUid is string && rData.patientUid.size() > 0 && rData.patientUid.size() <= 100 &&
+             rData.patientName is string && rData.patientName.size() > 0 && rData.patientName.size() <= 100 &&
+             rData.pharmacyUid is string && rData.pharmacyUid.size() > 0 && rData.pharmacyUid.size() <= 100 &&
+             rData.pharmacyName is string && rData.pharmacyName.size() > 0 && rData.pharmacyName.size() <= 100 &&
+             rData.prescriptionData is map && rData.prescriptionData.size() <= 100 &&
+             rData.status in ['pending', 'responded'] &&
+             rData.medicinesStatus is map && rData.medicinesStatus.size() <= 100 &&
+             rData.createdAt is timestamp &&
+             rData.updatedAt is timestamp;
+    }
+
+    match /pharmacyRequests/{reqId} {
+      allow read: if isAuthenticated() && (resource.data.patientUid == request.auth.uid || resource.data.pharmacyUid == request.auth.uid);
+      allow create: if isAuthenticated() && request.resource.data.patientUid == request.auth.uid && isValidPharmacyRequest();
+      allow update: if isAuthenticated() && resource.data.pharmacyUid == request.auth.uid && isValidPharmacyRequest() &&
+                       areImmutableFieldsUnchanged(['patientUid', 'pharmacyUid', 'createdAt', 'prescriptionData', 'patientName', 'pharmacyName']);
+    }
+
+  }
+}

@@ -1,0 +1,36 @@
+﻿<!DOCTYPE html>
+<html>
+<head>
+  <title>Test Translate</title>
+  <style>
+    /* Hide Google Translate elements */
+    body { top: 0 !important; }
+    .skiptranslate, .goog-te-banner-frame, #google_translate_element { display: none !important; }
+  </style>
+</head>
+<body>
+  <h1>Hello World</h1>
+  <p>This is a test of the translation system.</p>
+  
+  <select id="langSwitch" onchange="changeLanguage(this.value)">
+    <option value="/en/en">English</option>
+    <option value="/en/hi">Hindi</option>
+    <option value="/en/mr">Marathi</option>
+    <option value="/en/bn">Bengali</option>
+  </select>
+
+  <div id="google_translate_element"></div>
+  <script type="text/javascript">
+    function googleTranslateElementInit() {
+      new google.translate.TranslateElement({pageLanguage: 'en', autoDisplay: false}, 'google_translate_element');
+    }
+    
+    function changeLanguage(lang) {
+      document.cookie = "googtrans=" + lang + "; domain=" + window.location.hostname + "; path=/";
+      document.cookie = "googtrans=" + lang + "; domain=." + window.location.hostname + "; path=/";
+      window.location.reload();
+    }
+  </script>
+  <script type="text/javascript" src="https://translate.google.com/translate_a/element.js?cb=googleTranslateElementInit"></script>
+</body>
+</html>

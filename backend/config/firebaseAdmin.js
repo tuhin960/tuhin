@@ -23,9 +23,10 @@ try {
 } catch (err) {
   console.warn(
     `[firebaseAdmin] Could not load service account at "${keyPath}". ` +
-    `Token verification and Firestore reads will fail until it is provided. (${err.message})`
+    `Using default initialization with projectId for token verification. (${err.message})`
   );
-  app = initializeApp(); // allows the server to boot for non-Firebase routes during setup
+  // For the prototype, provide the projectId from frontend config to allow verifyIdToken to work
+  app = initializeApp({ projectId: "claude-cf628" }); 
 }
 
 export const adminAuth = getAuth(app);

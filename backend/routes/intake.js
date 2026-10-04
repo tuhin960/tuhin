@@ -10,7 +10,7 @@ import { verifyFirebaseToken, requireRole } from "../middleware/verifyFirebaseTo
 
 const router = Router();
 
-const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-3.5-flash";
+const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-3.8-flash";
 const MAX_CHARS = 2000;
 
 const SYSTEM_PROMPT = `You are a medical intake assistant inside the Swasth Setu telemedicine app.
