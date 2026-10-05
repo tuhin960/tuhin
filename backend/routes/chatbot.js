@@ -10,7 +10,7 @@ import { verifyFirebaseToken } from "../middleware/verifyFirebaseToken.js";
 
 const router = Router();
 
-const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-3.5-flash-lite";
+const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-1.5-flash";
 
 const SYSTEM_PROMPT = `You are "Setu", a friendly health-information assistant inside the Swasth Setu app.
 Rules you must always follow:
