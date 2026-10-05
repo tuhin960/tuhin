@@ -3,14 +3,14 @@
 // POST /api/intake  (patient only)
 // Takes the patient's problem in ANY language and returns a structured
 // English medical summary for the doctor. The AI only translates and
-// structures what the patient said — it never diagnoses.
+// structures what the patient said â€” it never diagnoses.
 
 import { Router } from "express";
 import { verifyFirebaseToken, requireRole } from "../middleware/verifyFirebaseToken.js";
 
 const router = Router();
 
-const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-1.5-flash";
+const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-3.8-flash";
 const MAX_CHARS = 2000;
 
 const SYSTEM_PROMPT = `You are a medical intake assistant inside the Swasth Setu telemedicine app.
@@ -89,7 +89,7 @@ router.post("/", verifyFirebaseToken, requireRole("patient"), async (req, res) =
       return res.status(502).json({ error: "AI returned an unreadable summary. Try again." });
     }
 
-    // Sanitize — never trust the shape blindly.
+    // Sanitize â€” never trust the shape blindly.
     const list = (v) => (Array.isArray(v) ? v.filter((x) => typeof x === "string").slice(0, 12) : []);
     const summary = {
       chiefComplaint: String(parsed.chiefComplaint || "").slice(0, 300),

@@ -1,6 +1,6 @@
 // FILE: backend/routes/chatbot.js
 //
-// Proxies chat requests to Google Gemini — the API key lives only
+// Proxies chat requests to Google Gemini â€” the API key lives only
 // here, server-side, and is never sent to the browser. The system
 // prompt keeps replies to general health information, never a
 // diagnosis, and always points toward a real consultation.
@@ -10,7 +10,7 @@ import { verifyFirebaseToken } from "../middleware/verifyFirebaseToken.js";
 
 const router = Router();
 
-const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-1.5-flash";
+const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-3.8-flash";
 
 const SYSTEM_PROMPT = `You are "Setu", a friendly health-information assistant inside the Swasth Setu app.
 Rules you must always follow:
