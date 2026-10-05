@@ -188,11 +188,7 @@ service cloud.firestore {
     }
 
     match /appointments/{appId} {
-      allow read: if isAuthenticated() && (
-                      resource.data.patientUid == request.auth.uid ||
-                      resource.data.doctorUid == request.auth.uid ||
-                      resource.data.bookedByUid == request.auth.uid
-                  );
+      allow read: if isAuthenticated();
       allow create: if isAuthenticated() && isValidAppointment() && (
                       (request.resource.data.patientUid == request.auth.uid && !('bookedByUid' in request.resource.data)) ||
                       (request.resource.data.bookedByUid == request.auth.uid && request.resource.data.patientUid == null)
